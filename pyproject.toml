@@ -27,7 +27,7 @@ dependencies = [
 # Dependabot can propose updates.
 dev = [
     "pytest==9.1.1",
-    "ruff==0.16.7",
+    "ruff==0.16.8",
     "mypy==2.3.1",
     "pip-audit==2.10.1",
     "build==1.3.0",
