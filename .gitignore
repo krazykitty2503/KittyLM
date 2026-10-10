@@ -53,3 +53,41 @@ runs/
 Thumbs.db
 .idea/
 .vscode/
+
+# --- Coverage and test output ---------------------------------------------------
+
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+__pypackages__/
+.ipynb_checkpoints/
+
+# --- Dataset working areas ---------------------------------------------------------
+
+data/downloads/
+data/cache/
+data/staging/
+data/quarantine/
+
+# --- Experiment and tracking output -------------------------------------------------
+
+wandb/
+mlruns/
+lightning_logs/
+tensorboard/
+checkpoints/
+
+# --- Additional model/export artifacts -----------------------------------------------
+
+*.onnx
+*.h5
+*.hdf5
+*.tflite
+*.mlmodel
+*.parquet
+*.arrow
+*.feather
+
