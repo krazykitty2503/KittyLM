@@ -1,4 +1,4 @@
-## KittyLM // Data Sources
+# KittyLM // Data Sources
 
 **Dataset Provenance · Licensing · Scientific Reproducibility · Privacy · Research Integrity**
 
