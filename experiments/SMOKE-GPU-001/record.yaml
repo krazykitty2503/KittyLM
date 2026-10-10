@@ -1,0 +1,269 @@
+schema_version: 2
+experiment:
+  id: SMOKE-GPU-001
+  kind: smoke
+  name: smoke-gpu-001-fixture-overfit
+  description: 'Engineering proof: Nano overfits the smoke fixture on D-023 windows.'
+repository:
+  git_commit: 77f5dbef90bc990a91ec6d1dbdba5a96a1daa202
+  git_dirty: false
+environment:
+  python: 3.12.10
+  pytorch: 2.13.0+rocm10.0.0
+  backend: rocm
+  backend_version: 7.15.26333
+  device: AMD Radeon RX 9060 XT
+  dtype: bf16
+  os: Windows 11
+dataset:
+  name: smoke-corpus-fixture
+  version: 5d512070ae3cb48d7153bede31bedd845b90b44fe6170c2b6052a0de08b3ed9b
+  manifest_sha256: 5d512070ae3cb48d7153bede31bedd845b90b44fe6170c2b6052a0de08b3ed9b
+  recipe_version: 0
+  sources: 1
+  documents: 1
+  training_bytes: 1255
+  validation_bytes: null
+  training_tokens: 477
+  validation_tokens: null
+tokenizer:
+  version: bpe-512@smoke
+  vocab_size: 512
+  tokenizer_sha256: 47df688a281edf6c9a1a3df5f6e834db27eb9d14e77696e000f574c1a3d29ba0
+  bytes_per_token: 2.631027253668763
+  tokens_per_byte: 0.3800796812749004
+model:
+  architecture: transformer
+  d_model: 128
+  layers: 4
+  heads: 4
+  ffn_dim: 384
+  context_length: 256
+  parameters:
+    total: 918656
+    trainable: 918656
+    embedding: 65536
+    attention: 262144
+    mlp: 589824
+    normalization: 1152
+    positional: 0
+    output: 0
+    tied_parameters: 65536
+    non_embedding: 853120
+training:
+  optimizer: AdamW
+  learning_rate: 0.003
+  schedule: warmup_cosine
+  batch_size: 3
+  gradient_accumulation: 1
+  max_steps: 400
+  training_steps: 400
+  tokens_seen: 292800
+  bytes_seen: 770365
+  precision: bf16
+  attention_kernel: reference
+  seed: 1234
+  min_learning_rate: 0.0003
+  warmup_steps: 20
+  weight_decay: 0.0
+  beta1: 0.9
+  beta2: 0.95
+  adam_eps: 1.0e-08
+  grad_clip: 1.0
+  effective_batch_size: 3
+  context_length: 256
+  sampler: fixed_windows
+results:
+  final_loss: 1.1368136662375556e-05
+  final_ppl: 1.00001136820128
+  final_bpb: 6.255415936050994e-06
+  val_bpb_by_category:
+    fixture: 6.255415936050994e-06
+  test_ppl: null
+  tokens_per_second: 30211.92052598109
+  samples_per_second: 123.81934641795529
+  timing_breakdown:
+    data:
+      mean_ms: 0.39975249965209514
+      p50_ms: 0.3591499989852309
+      p95_ms: 0.6142999991425313
+    forward:
+      mean_ms: 62.037857500581595
+      p50_ms: 6.027949999406701
+      p95_ms: 7.347500002651941
+    backward:
+      mean_ms: 19.42990750030731
+      p50_ms: 7.878299998992588
+      p95_ms: 9.635900001740083
+    optimizer:
+      mean_ms: 7.080107500405575
+      p50_ms: 1.5903000021353364
+      p95_ms: 2.1309000003384426
+  peak_vram_gb: 0.20634984970092773
+  allocated_vram_gb: null
+  duration_seconds: 9.691538799997943
+  inference: null
+reproducibility:
+  determinism_mode: semi_deterministic
+  checkpoint_resume_test: passed
+  resume_evidence:
+    harness: kittylm.training.resume_harness
+    run_id: SMOKE-GPU-001
+    kill_step: 20
+    resumed_to_step: 40
+    metrics_sha256: 6073b88594dc85e92b6ef5d8580c84aea9260382f75b9d1d1e06a5b286898ff9
+    comparison:
+      global_step: exact
+      tokens_seen: exact
+      skipped_steps: exact
+      scheduler: exact
+      learning_rates: exact
+      optimizer_state: exact
+      grad_scaler: exact
+      model_parameters: exact
+      best_val_loss: exact
+      rng_python: exact
+      rng_numpy: exact
+      rng_torch: exact
+      rng_cuda: exact
+      loader_state: exact
+      loss_series: exact
+      batch_indices: exact
+      next_batch_indices: exact
+      device_type: cuda
+ci_evidence: null
+status: completed
+failure: null
+training_trace:
+  steps: 400
+  initial_loss: 6.267349720001221
+  final_loss: 1.1504374015203211e-05
+  loss_trajectory:
+  - step: 1
+    loss: 6.267349720001221
+  - step: 10
+    loss: 4.859793663024902
+  - step: 20
+    loss: 2.793658971786499
+  - step: 30
+    loss: 0.8799381852149963
+  - step: 40
+    loss: 0.23192815482616425
+  - step: 50
+    loss: 0.04184899479150772
+  - step: 60
+    loss: 0.011709872633218765
+  - step: 70
+    loss: 0.005659746937453747
+  - step: 80
+    loss: 0.003596656955778599
+  - step: 90
+    loss: 0.0026315059512853622
+  - step: 100
+    loss: 0.0021036327816545963
+  - step: 110
+    loss: 0.001745621208101511
+  - step: 120
+    loss: 0.001474280608817935
+  - step: 130
+    loss: 0.0012482519960030913
+  - step: 140
+    loss: 0.0010560612427070737
+  - step: 150
+    loss: 0.0008881241083145142
+  - step: 160
+    loss: 0.0007414311985485256
+  - step: 170
+    loss: 0.0006149700493551791
+  - step: 180
+    loss: 0.0005065615987405181
+  - step: 190
+    loss: 0.0004171940963715315
+  - step: 200
+    loss: 0.00034267487353645265
+  - step: 210
+    loss: 0.0002811597951222211
+  - step: 220
+    loss: 0.0002302581851836294
+  - step: 230
+    loss: 0.00018886553880292922
+  - step: 240
+    loss: 0.00015510470257140696
+  - step: 250
+    loss: 0.00012794778740499169
+  - step: 260
+    loss: 0.00010603792907204479
+  - step: 270
+    loss: 8.81146261235699e-05
+  - step: 280
+    loss: 7.352059037657455e-05
+  - step: 290
+    loss: 6.155571463750675e-05
+  - step: 300
+    loss: 5.1832761528203264e-05
+  - step: 310
+    loss: 4.391853872220963e-05
+  - step: 320
+    loss: 3.739963722182438e-05
+  - step: 330
+    loss: 3.19913488056045e-05
+  - step: 340
+    loss: 2.7544689146452583e-05
+  - step: 350
+    loss: 2.379321085754782e-05
+  - step: 360
+    loss: 2.0584404410328716e-05
+  - step: 370
+    loss: 1.7819858840084635e-05
+  - step: 380
+    loss: 1.5490062651224434e-05
+  - step: 390
+    loss: 1.3397671864368021e-05
+  - step: 400
+    loss: 1.1504374015203211e-05
+  loss_series_sha256: cfeb2ea287554b117f50b7fcf4d9654865e31ed84c1c3e84c46d6e1530ad2be7
+  max_grad_norm: 7.984025001525879
+  max_loss_increase_ratio: 0.9896886248274279
+  mean_step_time_ms: 24.228846999994857
+  state_checks:
+    loss_finite: true
+    grad_norm_finite: true
+    parameters_finite: true
+    learned: true
+  determinism_warnings: []
+gate:
+  max_loss: 0.05
+  max_ppl: 1.05
+  min_token_match: 0.95
+  prompt_tokens: 16
+  context_stride: 128
+  windows: 3
+  final_loss: 1.1368136662375556e-05
+  final_ppl: 1.00001136820128
+  token_match_rate: 1.0
+  longest_exact_prefix: 461
+  exact_match: true
+  scored_tokens: 476
+  reference_tokens: 461
+  generated_tokens: 461
+  nonfinite: []
+  checks:
+    final_loss_below_max: true
+    ppl_at_most_max: true
+    ppl_consistent: true
+    token_match_at_least_min: true
+    all_values_finite: true
+  passed: true
+  repeat_loss_series: identical
+  repeat_passed: true
+checkpoint:
+  file: step-00000400-a2bf45006978b7e0.pt
+  payload_sha256: a2bf45006978b7e0d0b2ad6fe5d1ccf603efc9ff0351d4c297ff02c9e1c798d4
+  global_step: 400
+limitations:
+- 'SMOKE: engineering-only test. Must not be used for architecture or model-quality conclusions.'
+- 'Single 477-token fixture: the run measures memorization of that fixture only.'
+- Gate and training use the same D-023 windows (stride context/2).
+- ROCm GPU runs are semi-deterministic (D-012); the repeat loss series is compared.
+- Wall-clock and VRAM figures are measurements of one run on one machine, not benchmarks.
+notes: Engineering run. Not a model-quality result.
