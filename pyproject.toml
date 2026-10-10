@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77", "wheel"]
+requires = ["setuptools>=77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,12 +9,25 @@ description = "KittyLM: a personal language-model research platform within Kitty
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [{ name = "KrazyKitty" }]
+keywords = [
+    "artificial-intelligence",
+    "language-model",
+    "machine-learning",
+    "pytorch",
+    "research",
+]
 
-# Runtime dependencies are lower-bounded rather than pinned.
-# Local development may use a ROCm-enabled PyTorch build;
-# CI installs the CPU-compatible build for its environment.
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
 dependencies = [
     "torch>=2.4",
     "numpy>=1.26",
@@ -23,59 +36,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Development tools are pinned so local and CI checks remain reproducible.
-# Dependabot can propose updates.
 dev = [
     "pytest==9.1.1",
-    dependabot/pip/mypy-2.4.0
-    "ruff==0.16.7",
-    "mypy==2.4.0",
     "ruff==0.16.10",
-    "mypy==2.3.1",
-     main
+    "mypy==2.4.0",
     "pip-audit==2.10.1",
     "build==1.6.1",
 ]
-
-[project.urls]
-Homepage = "https://krazykitty.dev"
-Repository = "https://github.com/krazykitty2503/kittylm"
-Issues = "https://github.com/krazykitty2503/kittylm/issues"
-
-[tool.setuptools.packages.find]
-include = ["kittylm*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-ra --strict-markers"
-markers = [
-    "gpu: requires a ROCm/CUDA GPU; run locally with `pytest -m gpu`, never in CI",
-]
-
-[tool.ruff]
-target-version = "py312"
-line-length = 100
-extend-exclude = [".venv"]
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP", "D"]
-ignore = ["D107"]
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
-
-[tool.ruff.lint.per-file-ignores]
-"tests/**" = ["D"]
-"scripts/**" = ["D"]
-
-[tool.mypy]
-python_version = "3.12"
-files = ["kittylm"]
-check_untyped_defs = true
-warn_unused_ignores = true
-warn_redundant_casts = true
-no_implicit_optional = true
-
-[[tool.mypy.overrides]]
-module = ["yaml", "yaml.*", "regex"]
-ignore_missing_imports = true
