@@ -1,0 +1,60 @@
+KittyLM
+Independent Language Model Research & Development
+
+Copyright 2026 KrazyKitty.
+
+KittyLM is an independent scientific research and software engineering project focused on the development, evaluation and reproducible experimentation of original language model systems.
+
+## Software Licensing
+
+Original KittyLM software source code is licensed under the Apache License, Version 2.0.
+
+The complete licence terms are provided in the repository's LICENSE file.
+
+Official licence reference:
+[https://www.apache.org/licenses/LICENSE-2.0](https://www.apache.org/licenses/LICENSE-2.0)
+
+## Documentation
+
+KittyLM documentation is licensed under Creative Commons Attribution 4.0 International (CC BY 4.0), except where otherwise indicated.
+
+See docs/LICENSE.md for the applicable scope and attribution requirements.
+
+## Model Weights
+
+KittyLM model weights are governed separately from the software source code.
+
+The project's current intended licence for future released model weights is Apache-2.0.
+
+The existence of a model-weights licensing policy does not imply that trained weights have been released.
+
+See MODEL_LICENSE.md and any accompanying model-specific release documentation.
+
+## Research Datasets
+
+Training datasets remain subject to their respective source licences, permissions and usage restrictions.
+
+The KittyLM software licence does not override third-party dataset rights or authorise unrestricted use or redistribution of source material.
+
+Dataset provenance and licensing information are documented in DATA_SOURCES.md.
+
+## Third-Party Components
+
+Third-party libraries, frameworks and dependencies retain their applicable licences and copyright notices.
+
+See THIRD_PARTY_NOTICES.md for recorded dependency attribution information.
+
+## Research and Engineering Documentation
+
+Project engineering standards, contribution procedures, experimental reproducibility requirements and responsible-use policies are maintained in separate documentation.
+
+These policies do not modify the Apache License, Version 2.0.
+
+## Attribution
+
+Project: KittyLM
+Creator: KrazyKitty
+Repository: [https://github.com/krazykitty2503/kittylm](https://github.com/krazykitty2503/kittylm)
+Website: [https://krazykitty.dev](https://krazykitty.dev)
+
+This NOTICE file is provided for attribution and informational purposes. It does not amend or replace any applicable licence terms.
