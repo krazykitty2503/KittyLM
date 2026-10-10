@@ -1,0 +1,24 @@
+kind: training
+# SMOKE-GPU-001 (engineering-only, D-017): Nano overfits the 477-token smoke fixture on the
+# ROCm GPU through the D-023 fixed windows. batch_size must equal the number of windows the
+# fixture produces at Nano's context (3: starts 0, 128, 256), which the driver checks.
+seed: 1234
+batch_size: 3
+gradient_accumulation: 1
+max_steps: 400
+learning_rate: 0.003
+min_learning_rate: 0.0003
+warmup_steps: 20
+weight_decay: 0.0
+beta1: 0.9
+beta2: 0.95
+adam_eps: 1.0e-08
+grad_clip: 1.0
+precision: bf16
+determinism: semi_deterministic
+log_every: 10
+eval_every: 0
+checkpoint_every: 0
+keep_last: 3
+timing_sync_every: 10
+cpu_threads: 0

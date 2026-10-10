@@ -16,7 +16,7 @@ from kittylm.ledger import (
     parse_record,
 )
 from tests.conftest import load_script
-from tests.test_ledger import COMMIT, valid_record
+from tests.test_ledger import COMMIT, complete_smoke_record, valid_record
 
 RUN = {"id": 777, "name": "Test", "event": "push", "head_sha": COMMIT, "status": "completed"}
 JOBS = [
@@ -55,12 +55,8 @@ def test_formal_records_require_ci_evidence_but_smoke_records_do_not() -> None:
     data["ci_evidence"] = None
     with pytest.raises(LedgerError, match="ci_evidence is required"):
         parse_record(data)
-    smoke = valid_record()
-    smoke["experiment"].update(id="SMOKE-GPU-001", kind="smoke")
-    smoke["ci_evidence"] = None
-    from kittylm.ledger import SMOKE_LIMITATION
-
-    smoke["limitations"] = [SMOKE_LIMITATION]
+    smoke = complete_smoke_record()
+    assert smoke["ci_evidence"] is None
     assert parse_record(smoke).ci_evidence is None
 
 

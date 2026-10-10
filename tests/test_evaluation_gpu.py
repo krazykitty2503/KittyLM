@@ -13,10 +13,10 @@ import pytest
 import torch
 from torch import nn
 
+from kittylm.data.windows import context_start
 from kittylm.evaluation.gates import evaluate_overfit_gate
 from kittylm.evaluation.inference_speed import measure_inference_speed
 from kittylm.evaluation.perplexity import stream_nll
-from kittylm.evaluation.windows import context_start
 from kittylm.inference.generate import SamplingConfig, generate
 from kittylm.model.transformer import KittyLM
 from tests.test_model_gpu import model_config, require_gpu, selected

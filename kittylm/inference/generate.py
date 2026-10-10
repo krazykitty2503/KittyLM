@@ -62,7 +62,7 @@ from typing import Literal
 import torch
 from torch import nn
 
-from kittylm.evaluation.windows import context_start
+from kittylm.data.windows import context_start
 from kittylm.inference.runtime import (
     autocast_context,
     cache_dtype,

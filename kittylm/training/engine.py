@@ -37,7 +37,10 @@ Math:
 Invariants:
     - ``global_step`` equals the schedule step, the number of *applied* optimizer updates and
       ``len(history)`` for an engine that has not resumed.
-    - ``tokens_seen = global_step * batch_size * gradient_accumulation * context_length``.
+    - ``tokens_seen`` sums the real (non-padding) input tokens of every applied step; with random
+      windows that is ``global_step * batch_size * gradient_accumulation * context_length``.
+    - ``training_config.batch_size`` equals the sampler's batch size (fixed-window samplers
+      define it as the number of D-023 windows).
     - fp16 only: when the loss scaler finds inf/NaN gradients it skips the update. A skipped
       attempt consumes its micro-batches (the sampler does not rewind), increments
       ``skipped_steps``, is written to ``train.log``, and changes neither the schedule,
@@ -78,7 +81,7 @@ import torch
 from torch import nn
 
 from kittylm.config import config_hash, to_dict
-from kittylm.data.loader import Batch, TrainWindowSampler
+from kittylm.data.loader import Batch, BatchSampler
 from kittylm.ledger import CiEvidence, ci_evidence_problems
 from kittylm.model.accounting import count_parameters
 from kittylm.model.config import ModelConfig
@@ -151,7 +154,7 @@ class TrainingEngine:
         model: nn.Module,
         model_config: ModelConfig,
         training_config: TrainingConfig,
-        sampler: TrainWindowSampler,
+        sampler: BatchSampler,
         device: torch.device,
         run_dir: Path,
         identity: RunIdentity,
@@ -165,7 +168,15 @@ class TrainingEngine:
             if run.git_dirty:
                 raise CiGateError("formal run refused: working tree has uncommitted changes")
         if sampler.context_length > model_config.context_length:
-            raise ValueError("sampler context_length exceeds the model context_length")
+            raise ValueError(
+                f"sampler context_length {sampler.context_length} exceeds the model context_length "
+                f"{model_config.context_length}"
+            )
+        if sampler.batch_size != training_config.batch_size:
+            raise ValueError(
+                f"training batch_size {training_config.batch_size} does not match the sampler's "
+                f"batch size {sampler.batch_size}"
+            )
         if training_config.eval_every > 0 and not validation_batches:
             raise ValueError("eval_every > 0 requires validation_batches")
         self.parameter_counts = count_parameters(model)  # raises AccountingError if inconsistent
@@ -300,12 +311,15 @@ class TrainingEngine:
         self.optimizer.zero_grad(set_to_none=True)
         scaler = self.precision.scaler
         loss_total = 0.0
+        step_tokens = step_samples = 0
         starts: list[list[int]] = []
         for _ in range(cfg.gradient_accumulation):
             with self.timer.phase("data"):
                 batch = self.sampler.next_batch()
                 inputs, targets = self._to_device(batch)
                 starts.append(batch.starts)
+                step_tokens += batch.n_tokens
+                step_samples += len(batch.starts)
             with self.timer.phase("forward"):
                 with self.precision.autocast():
                     logits = self.model(inputs)
@@ -357,10 +371,9 @@ class TrainingEngine:
         self._consecutive_skips = 0
         self.schedule.advance()
         self.global_step += 1
-        tokens = cfg.batch_size * cfg.gradient_accumulation * self.sampler.context_length
-        self.tokens_seen += tokens
-        self._tokens_since_lap += tokens
-        self._samples_since_lap += cfg.batch_size * cfg.gradient_accumulation
+        self.tokens_seen += step_tokens
+        self._tokens_since_lap += step_tokens
+        self._samples_since_lap += step_samples
         result = StepResult(self.global_step, loss_total, lr, grad_norm, self.tokens_seen, starts)
         self.history.append(result)
 

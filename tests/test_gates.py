@@ -9,6 +9,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
+from kittylm.data.windows import evaluation_windows
 from kittylm.evaluation.gates import (
     OverfitGateThresholds,
     compare_loss_series,
@@ -16,7 +17,6 @@ from kittylm.evaluation.gates import (
     nonfinite_metrics,
     token_match,
 )
-from kittylm.evaluation.windows import evaluation_windows
 from kittylm.model.transformer import KittyLM
 from tests.training_helpers import TINY_MODEL
 

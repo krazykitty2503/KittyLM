@@ -14,7 +14,6 @@ import pytest
 
 from kittylm.config import to_dict
 from kittylm.ledger import (
-    SMOKE_LIMITATION,
     BenchmarkCell,
     BenchmarkRecord,
     LedgerError,
@@ -26,16 +25,13 @@ from kittylm.ledger import (
     select_attention_path,
     write_benchmark,
 )
-from tests.test_ledger import COMMIT, mutate, valid_record
+from tests.test_ledger import COMMIT, complete_smoke_record, valid_record
 
 # --- record kinds ---------------------------------------------------------------------------------
 
 
 def smoke_record() -> dict[str, Any]:
-    data = mutate("experiment.id", "SMOKE-GPU-001")
-    data["experiment"]["kind"] = "smoke"
-    data["limitations"] = [SMOKE_LIMITATION, "tiny fixture"]
-    return data
+    return complete_smoke_record()
 
 
 def test_smoke_record_is_valid_and_excluded_from_ablation_table() -> None:
