@@ -19,7 +19,9 @@ Purpose:
     be nondeterministic). Only this module constructs ``ResumeEvidence`` (D-012).
 
 Public API:
-    HarnessSpec(run_id, model, training, token_file, device, kill_step, total_steps, git_commit)
+    HarnessSpec(run_id, model, training, token_file, device, kill_step, total_steps, git_commit,
+                sampler="random", stride=None)
+        ``sampler="fixed_windows"`` trains on the D-023 windows of the token file (SMOKE-GPU-001).
     validate_resume(spec, work_dir, python=sys.executable) -> ResumeReport
     compare_runs(full, first, resume, full_state, resumed_state, device_type) -> dict[str, str]
     ResumeReport(passed, checkpoint_resume_test, categories, exact_required, evidence)
@@ -38,7 +40,9 @@ Device:
 
 Invariants:
     - Every run is a fresh process, so no in-memory state can leak across the "kill".
-    - ``passed`` is True only if every category in ``exact_required`` is ``exact``.
+    - ``passed`` is True only if every category in ``exact_required`` is ``exact`` and every other
+      category (GPU tensors and losses) is exact or within ``RESUME_GPU_MAX_ABS_DEV`` absolute
+      deviation; the ledger applies the same rule (``resume_verdict_ok``).
     - The evidence's ``metrics_sha256`` hashes all three runs' series and the comparison.
 
 Failure modes:
@@ -67,12 +71,18 @@ from typing import Any, Literal
 import torch
 
 from kittylm.config import canonical_json, config_hash, from_dict
-from kittylm.data.loader import TrainWindowSampler, open_token_file
+from kittylm.data.loader import (
+    BatchSampler,
+    FixedWindowSampler,
+    TrainWindowSampler,
+    open_token_file,
+)
 from kittylm.ledger import (
     RESUME_CATEGORIES,
     RESUME_EXACT_REQUIRED,
     RESUME_HARNESS,
     ResumeEvidence,
+    resume_verdict_ok,
 )
 from kittylm.model.config import ModelConfig
 from kittylm.model.transformer import KittyLM
@@ -115,6 +125,8 @@ class HarnessSpec:
     kill_step: int
     total_steps: int
     git_commit: str
+    sampler: Literal["random", "fixed_windows"] = "random"
+    stride: int | None = None
 
 
 @dataclass(frozen=True)
@@ -262,14 +274,29 @@ def run_worker(spec: HarnessSpec, mode: str, run_dir: Path, out_path: Path) -> N
     device = torch.device(spec.device)
     model = KittyLM(model_config)
     token_file = Path(spec.token_file)
-    sampler = TrainWindowSampler(
-        open_token_file(token_file),
-        context_length=model_config.context_length,
-        batch_size=training_config.batch_size,
-        seed=training_config.seed,
-    )
+    sampler: BatchSampler
+    if spec.sampler == "fixed_windows":
+        sampler = FixedWindowSampler(
+            open_token_file(token_file),
+            context_length=model_config.context_length,
+            stride=spec.stride,
+        )
+    else:
+        sampler = TrainWindowSampler(
+            open_token_file(token_file),
+            context_length=model_config.context_length,
+            batch_size=training_config.batch_size,
+            seed=training_config.seed,
+        )
     identity = RunIdentity(
-        config_hash=config_hash({"model": spec.model, "training": spec.training}),
+        config_hash=config_hash(
+            {
+                "model": spec.model,
+                "training": spec.training,
+                "sampler": spec.sampler,
+                "stride": spec.stride,
+            }
+        ),
         tokenizer_sha256=HARNESS_TOKENIZER_SHA256,
         dataset_version=_dataset_version(token_file),
     )
@@ -385,7 +412,7 @@ def validate_resume(
     device_type = torch.device(spec.device).type
     categories = compare_runs(full, first, resume, full_state, resumed_state, device_type)
     exact_required = GPU_EXACT_CATEGORIES if device_type == "cuda" else CPU_EXACT_CATEGORIES
-    passed = all(categories[name] == "exact" for name in exact_required)
+    passed = all(resume_verdict_ok(name, categories[name], device_type) for name in ALL_CATEGORIES)
 
     digest = hashlib.sha256(
         canonical_json(

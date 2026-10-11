@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from kittylm.data.windows import context_start
 from kittylm.evaluation.perplexity import (
     Document,
     EvaluationReport,
@@ -21,7 +22,6 @@ from kittylm.evaluation.perplexity import (
     stream_nll,
     token_byte_lengths,
 )
-from kittylm.evaluation.windows import context_start
 from kittylm.model.transformer import KittyLM
 from tests.training_helpers import TINY_MODEL
 

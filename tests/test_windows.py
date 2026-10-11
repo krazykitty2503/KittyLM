@@ -7,7 +7,7 @@ import itertools
 import pytest
 
 from kittylm.config import from_dict, load_yaml
-from kittylm.evaluation.windows import (
+from kittylm.data.windows import (
     Window,
     context_start,
     default_stride,

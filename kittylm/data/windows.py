@@ -3,8 +3,10 @@
 Purpose:
     A model with context length ``C`` cannot see a stream of ``N > C + 1`` tokens at once (for
     example the 477-token smoke fixture with Nano's context of 256). This module defines the one
-    policy every consumer uses, so loss, perplexity, bits-per-byte, greedy token matching and
-    generation all condition each prediction on the *same* context:
+    policy every consumer uses, so training (SMOKE-GPU-001, EXP-000), loss, perplexity,
+    bits-per-byte, greedy token matching and generation all condition each prediction on the
+    *same* context. It lives in ``kittylm.data`` so training and evaluation share one
+    implementation without evaluation depending on training:
 
     - Windows start at multiples of ``stride`` (default ``C // 2``): ``0, S, 2S, ...``.
     - A window holds up to ``C + 1`` tokens: ``C`` inputs and the ``C`` shifted targets. The last
@@ -21,6 +23,11 @@ Public API:
     default_stride(context_length) -> int
     evaluation_windows(n_tokens, context_length, stride=None) -> list[Window]
     context_start(position, context_length, stride=None) -> int
+    WindowExample(window, inputs, targets)
+    window_examples(ids, context_length, stride=None) -> list[WindowExample]
+        Model inputs and targets per window, with targets not scored by that window replaced by
+        IGNORE_INDEX; used by the fixed-window training sampler and by stream evaluation.
+    IGNORE_INDEX
 
 Math:
     ``context_start(t) = S * max(0, ceil((t - C) / S))``. Window ``k`` starts at ``kS``, ends at
@@ -31,6 +38,8 @@ Invariants:
     - For every window and every target ``t`` it scores, ``context_start(t) == window.start``
       and ``t - window.start <= C`` (the prediction sees at most ``C`` input tokens).
     - The policy depends only on ``(N, C, S)``: no randomness, no token values.
+    - ``window_examples`` keeps a target only where the window scores it, so the mean
+      cross-entropy over all examples (ignoring IGNORE_INDEX) is exactly the stream loss.
 
 Failure modes:
     - ``n_tokens < 2``, ``context_length < 1``, or a stride outside ``[1, context_length]``
@@ -42,9 +51,21 @@ See:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-__all__ = ["Window", "context_start", "default_stride", "evaluation_windows"]
+__all__ = [
+    "IGNORE_INDEX",
+    "Window",
+    "WindowExample",
+    "context_start",
+    "default_stride",
+    "evaluation_windows",
+    "window_examples",
+]
+
+# PyTorch cross-entropy's default ignore_index: targets with this value contribute no loss.
+IGNORE_INDEX = -100
 
 
 @dataclass(frozen=True)
@@ -110,3 +131,25 @@ def context_start(position: int, context_length: int, stride: int | None = None)
     step = _resolve_stride(context_length, stride)
     overflow = position - context_length
     return 0 if overflow <= 0 else step * -(-overflow // step)
+
+
+@dataclass(frozen=True)
+class WindowExample:
+    """One window's model inputs and targets (unscored targets are IGNORE_INDEX)."""
+
+    window: Window
+    inputs: tuple[int, ...]
+    targets: tuple[int, ...]
+
+
+def window_examples(
+    ids: Sequence[int], context_length: int, stride: int | None = None
+) -> list[WindowExample]:
+    """Inputs and masked targets for every D-023 window of ``ids``."""
+    examples = []
+    for window in evaluation_windows(len(ids), context_length, stride):
+        chunk = [int(t) for t in ids[window.start : window.end]]
+        targets = chunk[1:]
+        masked = [IGNORE_INDEX] * window.score_offset + targets[window.score_offset :]
+        examples.append(WindowExample(window, tuple(chunk[:-1]), tuple(masked)))
+    return examples

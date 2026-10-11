@@ -69,7 +69,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from kittylm.evaluation.windows import evaluation_windows
+from kittylm.data.windows import IGNORE_INDEX, window_examples
 from kittylm.inference.runtime import autocast_context, eval_mode, resolve_context_length
 from kittylm.ledger import PPL_REL_TOL
 
@@ -210,15 +210,19 @@ def stream_nll(
     ctx = resolve_context_length(model, context_length)
     nats, tokens, n_bytes = 0.0, 0, 0
     with eval_mode(model):
-        for window in evaluation_windows(len(ids), ctx, stride):
-            chunk = torch.tensor([list(ids[window.start : window.end])], device=device)
-            inputs, targets = chunk[:, :-1], chunk[0, 1:]
+        # The same examples the fixed-window training sampler uses (D-023): one implementation.
+        for example in window_examples(ids, ctx, stride):
+            window = example.window
+            inputs = torch.tensor([example.inputs], device=device)
+            targets = torch.tensor(example.targets, device=device)
             with autocast_context(device, autocast_dtype):
                 logits = model(inputs)
-            nll = F.cross_entropy(logits[0].float(), targets, reduction="none")
-            scored = nll[window.score_offset :]
-            nats += float(scored.double().sum())
-            tokens += scored.numel()
+            nll = F.cross_entropy(
+                logits[0].float(), targets, ignore_index=IGNORE_INDEX, reduction="none"
+            )
+            scored = targets != IGNORE_INDEX
+            nats += float(nll[scored].double().sum())  # accumulate in float64
+            tokens += int(scored.sum())
             n_bytes += sum(byte_lengths[window.score_from : window.end])
     return NLLTotals(nats, tokens, n_bytes)
 

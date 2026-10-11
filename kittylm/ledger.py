@@ -11,6 +11,9 @@ Public API:
     ExperimentRecord (and its section dataclasses), schema version 2
         ``experiment.kind`` is ``formal`` (``EXP-###[-suffix]``) or ``smoke``
         (``SMOKE-<AREA>-###``, must carry SMOKE_LIMITATION).
+        ``status`` is ``completed`` (measured ``results``) or ``failed`` (``failure`` and no
+        results); optional ``training_trace``, ``gate`` (overfit gate) and ``checkpoint``
+        sections are required for completed smoke records (D-025).
     parse_record / validate_record / render_record / write_record / load_record /
     load_all_records / render_ablation_table (formal records only)
     BenchmarkRecord (and its section dataclasses)
@@ -28,6 +31,11 @@ Invariants:
       comparison covers every RESUME_CATEGORIES entry, and ``passed`` requires every
       RESUME_EXACT_REQUIRED category for its device type to be ``exact``.
     - Smoke records always state they are engineering-only and never enter the ablation table.
+    - A failed record carries no results, so a failed run can never look successful; failed
+      records never enter the ablation table.
+    - Gate, training trace and checkpoint sections agree with each other and with the results
+      (``gate.passed == all(gate.checks)``, trace endpoints match the loss trajectory, the
+      checkpoint step equals the training steps, ``results.final_loss == gate.final_loss``).
     - A benchmark covers its whole grid (every variant x flag setting x length exactly once),
       every non-ok cell explains itself, and its recorded selection equals the selection
       recomputed from its cells.
@@ -95,6 +103,8 @@ __all__ = [
     "REQUIRED_CI_WORKFLOW",
     "RESUME_CATEGORIES",
     "RESUME_EXACT_REQUIRED",
+    "RESUME_GPU_MAX_ABS_DEV",
+    "resume_verdict_ok",
     "CiEvidence",
     "CiJob",
     "ResumeEvidence",
@@ -134,6 +144,9 @@ RESUME_EXACT_REQUIRED: dict[str, tuple[str, ...]] = {
         if c not in ("optimizer_state", "model_parameters", "loss_series")
     ),
 }
+# GPU resume tolerance (D-025): categories not required to be bit-exact on GPUs (tensors and the
+# loss series) must be exact or deviate by at most this absolute amount; anything else fails.
+RESUME_GPU_MAX_ABS_DEV = 1e-4
 PPL_REL_TOL = 1e-3
 RATIO_REL_TOL = 1e-3
 SMOKE_LIMITATION = (
@@ -260,6 +273,17 @@ class TrainingInfo:
     bytes_seen: int
     precision: Literal["bf16", "fp16", "fp32"]
     attention_kernel: str
+    seed: int | None = None
+    min_learning_rate: float | None = None
+    warmup_steps: int | None = None
+    weight_decay: float | None = None
+    beta1: float | None = None
+    beta2: float | None = None
+    adam_eps: float | None = None
+    grad_clip: float | None = None
+    effective_batch_size: int | None = None
+    context_length: int | None = None
+    sampler: str | None = None
 
 
 @dataclass(frozen=True)
@@ -361,6 +385,26 @@ def ci_evidence_problems(evidence: CiEvidence | None, commit: str) -> list[str]:
     return problems
 
 
+def resume_verdict_ok(category: str, verdict: str, device_type: str) -> bool:
+    """Whether one comparison verdict is acceptable for a *passed* resume test.
+
+    Exact-required categories must be ``exact``. Other categories (GPU tensors and losses) must
+    be ``exact`` or ``max_abs_dev=<x>`` with ``x <= RESUME_GPU_MAX_ABS_DEV``.
+    """
+    if verdict == "exact":
+        return True
+    if category in RESUME_EXACT_REQUIRED.get(device_type, RESUME_CATEGORIES):
+        return False
+    prefix = "max_abs_dev="
+    if not verdict.startswith(prefix):
+        return False
+    try:
+        deviation = float(verdict[len(prefix) :])
+    except ValueError:
+        return False
+    return math.isfinite(deviation) and deviation <= RESUME_GPU_MAX_ABS_DEV
+
+
 def _resume_comparison_problems(comparison: Mapping[str, str], status: str) -> list[str]:
     """The comparison must be complete and consistent with the recorded resume status."""
     device_type = comparison.get("device_type")
@@ -381,8 +425,20 @@ def _resume_comparison_problems(comparison: Mapping[str, str], status: str) -> l
         problems.append(
             f"checkpoint_resume_test=passed but {device_type} categories {not_exact} are not exact"
         )
-    if status == "failed" and not missing and not not_exact:
-        problems.append("checkpoint_resume_test=failed but every required category is exact")
+    beyond = [
+        c
+        for c in RESUME_CATEGORIES
+        if c not in required
+        and c in comparison
+        and not resume_verdict_ok(c, comparison[c], device_type)
+    ]
+    if status == "passed" and beyond:
+        problems.append(
+            f"checkpoint_resume_test=passed but {beyond} exceed the GPU tolerance "
+            f"{RESUME_GPU_MAX_ABS_DEV}"
+        )
+    if status == "failed" and not missing and not not_exact and not beyond:
+        problems.append("checkpoint_resume_test=failed but every category is within tolerance")
     return problems
 
 
@@ -400,6 +456,73 @@ def ci_evidence_from_github(
             for job in jobs
         },
     )
+
+
+@dataclass(frozen=True)
+class FailureInfo:
+    """Why a run failed (no results are recorded for a failed run)."""
+
+    stage: str
+    error_type: str
+    message: str
+
+
+@dataclass(frozen=True)
+class LossPoint:
+    """Training loss after one applied optimizer step."""
+
+    step: int
+    loss: float
+
+
+@dataclass(frozen=True)
+class TrainingTrace:
+    """How training behaved, step by step (D-025)."""
+
+    steps: int
+    initial_loss: float
+    final_loss: float
+    loss_trajectory: list[LossPoint]
+    loss_series_sha256: str
+    max_grad_norm: float
+    max_loss_increase_ratio: float
+    mean_step_time_ms: float | None
+    state_checks: dict[str, bool]
+    determinism_warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class OverfitGateInfo:
+    """Overfit-gate thresholds, measurements and verdict (kittylm/evaluation/gates.py)."""
+
+    max_loss: float
+    max_ppl: float
+    min_token_match: float
+    prompt_tokens: int
+    context_stride: int
+    windows: int
+    final_loss: float
+    final_ppl: float
+    token_match_rate: float
+    longest_exact_prefix: int
+    exact_match: bool
+    scored_tokens: int
+    reference_tokens: int
+    generated_tokens: int
+    nonfinite: list[str]
+    checks: dict[str, bool]
+    passed: bool
+    repeat_loss_series: str
+    repeat_passed: bool | None
+
+
+@dataclass(frozen=True)
+class CheckpointInfo:
+    """The checkpoint a completed run produced (file name only, never a path)."""
+
+    file: str
+    payload_sha256: str
+    global_step: int
 
 
 @dataclass(frozen=True)
@@ -423,9 +546,14 @@ class ExperimentRecord:
     tokenizer: TokenizerInfo
     model: ModelInfo
     training: TrainingInfo
-    results: ResultsInfo
+    results: ResultsInfo | None
     reproducibility: ReproducibilityInfo
     ci_evidence: CiEvidence | None = None
+    status: Literal["completed", "failed"] = "completed"
+    failure: FailureInfo | None = None
+    training_trace: TrainingTrace | None = None
+    gate: OverfitGateInfo | None = None
+    checkpoint: CheckpointInfo | None = None
     limitations: list[str] = field(default_factory=list)
     notes: str = ""
 
@@ -488,7 +616,7 @@ def validate_record(record: ExperimentRecord, forbidden_identifiers: Sequence[st
     # Non-negative / positive numbers.
     plain = to_dict(r)
     for section in ("dataset", "tokenizer", "model", "training", "results"):
-        for number_path, number in _iter_numbers(plain[section], section):
+        for number_path, number in _iter_numbers(plain[section] or {}, section):
             if number < 0:
                 problems.append(f"{number_path} must be >= 0, got {number}")
     for field_name, count in (
@@ -517,15 +645,23 @@ def validate_record(record: ExperimentRecord, forbidden_identifiers: Sequence[st
     if p.trainable > p.total or p.tied_parameters > p.total:
         problems.append("model.parameters: trainable and tied_parameters cannot exceed total")
 
+    # Status: a failed run records why, and never records results (D-025).
+    problems.extend(_status_problems(r))
+
     # Perplexity must be exp(natural-log loss).
-    try:
-        expected_ppl = math.exp(r.results.final_loss)
-        if not _close(r.results.final_ppl, expected_ppl, PPL_REL_TOL):
-            problems.append(
-                f"results.final_ppl {r.results.final_ppl} != exp(final_loss) {expected_ppl:.6g}"
-            )
-    except OverflowError:
-        problems.append("results.final_loss is too large for exp()")
+    if r.results is not None:
+        try:
+            expected_ppl = math.exp(r.results.final_loss)
+            if not _close(r.results.final_ppl, expected_ppl, PPL_REL_TOL):
+                problems.append(
+                    f"results.final_ppl {r.results.final_ppl} != exp(final_loss) {expected_ppl:.6g}"
+                )
+        except OverflowError:
+            problems.append("results.final_loss is too large for exp()")
+    problems.extend(_training_setup_problems(r))
+    problems.extend(_trace_problems(r))
+    problems.extend(_gate_problems(r))
+    problems.extend(_checkpoint_problems(r))
 
     # Byte/token accounting must be self-consistent.
     t, d = r.tokenizer, r.dataset
@@ -582,6 +718,140 @@ def validate_record(record: ExperimentRecord, forbidden_identifiers: Sequence[st
 
     if problems:
         raise LedgerError(problems)
+
+
+_SMOKE_TRAINING_FIELDS = (
+    "seed",
+    "min_learning_rate",
+    "warmup_steps",
+    "weight_decay",
+    "beta1",
+    "beta2",
+    "adam_eps",
+    "grad_clip",
+    "effective_batch_size",
+    "context_length",
+    "sampler",
+)
+_REPEAT_VERDICT = re.compile(r"^(identical|not_run|max_abs_dev=\S+|length differs \(\d+ vs \d+\))$")
+_FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+
+def _status_problems(r: ExperimentRecord) -> list[str]:
+    problems: list[str] = []
+    if r.status == "completed":
+        if r.results is None:
+            problems.append("status=completed requires measured results")
+        if r.failure is not None:
+            problems.append("status=completed must not carry failure information")
+        if r.experiment.kind == "smoke":
+            for name in ("training_trace", "gate", "checkpoint"):
+                if getattr(r, name) is None:
+                    problems.append(f"completed smoke records require the {name} section")
+            missing = [f for f in _SMOKE_TRAINING_FIELDS if getattr(r.training, f) is None]
+            if missing:
+                problems.append(f"completed smoke records require training fields {missing}")
+    else:
+        if r.failure is None:
+            problems.append("status=failed requires failure information")
+        if r.results is not None or r.gate is not None or r.checkpoint is not None:
+            problems.append("status=failed must not record results, a gate verdict or a checkpoint")
+        if r.reproducibility.checkpoint_resume_test == "passed":
+            problems.append("status=failed cannot claim checkpoint_resume_test=passed")
+    return problems
+
+
+def _training_setup_problems(r: ExperimentRecord) -> list[str]:
+    t = r.training
+    problems: list[str] = []
+    if t.effective_batch_size is not None and t.effective_batch_size != (
+        t.batch_size * t.gradient_accumulation
+    ):
+        problems.append("training.effective_batch_size != batch_size * gradient_accumulation")
+    if t.context_length is not None and t.context_length > r.model.context_length:
+        problems.append("training.context_length exceeds model.context_length")
+    for name in ("min_learning_rate", "weight_decay", "beta1", "beta2", "adam_eps", "grad_clip"):
+        value = getattr(t, name)
+        if value is not None and not math.isfinite(value):
+            problems.append(f"training.{name} must be finite")
+    if t.training_steps > t.max_steps:
+        problems.append("training.training_steps exceeds training.max_steps")
+    return problems
+
+
+def _trace_problems(r: ExperimentRecord) -> list[str]:
+    trace = r.training_trace
+    if trace is None:
+        return []
+    problems: list[str] = []
+    points = trace.loss_trajectory
+    if not points:
+        return ["training_trace.loss_trajectory must not be empty"]
+    steps = [p.step for p in points]
+    if steps != sorted(set(steps)) or steps[0] < 1:
+        problems.append("training_trace.loss_trajectory steps must be unique, ascending and >= 1")
+    if steps[-1] != trace.steps or trace.steps != r.training.training_steps:
+        problems.append("training_trace must end at training.training_steps")
+    if steps[0] != 1 or points[0].loss != trace.initial_loss:
+        problems.append("training_trace.initial_loss must be the loss of step 1")
+    if points[-1].loss != trace.final_loss:
+        problems.append("training_trace.final_loss must be the last trajectory loss")
+    values = [trace.initial_loss, trace.final_loss, trace.max_grad_norm]
+    values += [p.loss for p in points]
+    if not all(math.isfinite(v) for v in values):
+        problems.append("training_trace values must be finite")
+    if not _SHA256_HEX.match(trace.loss_series_sha256):
+        problems.append("training_trace.loss_series_sha256 must be a sha256 hex digest")
+    if not trace.state_checks:
+        problems.append("training_trace.state_checks must not be empty")
+    return problems
+
+
+def _gate_problems(r: ExperimentRecord) -> list[str]:
+    gate = r.gate
+    if gate is None:
+        return []
+    problems: list[str] = []
+    if not gate.checks:
+        problems.append("gate.checks must not be empty")
+    if gate.passed != (bool(gate.checks) and all(gate.checks.values())):
+        problems.append("gate.passed must equal all(gate.checks)")
+    if math.isfinite(gate.final_loss):
+        try:
+            if not _close(gate.final_ppl, math.exp(gate.final_loss), PPL_REL_TOL):
+                problems.append("gate.final_ppl != exp(gate.final_loss)")
+        except OverflowError:
+            if gate.final_ppl != math.inf:
+                problems.append("gate.final_ppl must be inf when exp(final_loss) overflows")
+    if r.results is not None and not _close(r.results.final_loss, gate.final_loss, 1e-12):
+        problems.append("results.final_loss must equal gate.final_loss (the gate's evaluation)")
+    if not 0 <= gate.token_match_rate <= 1:
+        problems.append("gate.token_match_rate must be in [0, 1]")
+    if gate.generated_tokens > gate.reference_tokens or gate.longest_exact_prefix > (
+        gate.reference_tokens
+    ):
+        problems.append("gate generated tokens and prefix cannot exceed the reference")
+    if not _REPEAT_VERDICT.match(gate.repeat_loss_series):
+        problems.append(
+            "gate.repeat_loss_series must be identical, not_run, max_abs_dev=... or length differs"
+        )
+    if (gate.repeat_loss_series == "not_run") != (gate.repeat_passed is None):
+        problems.append("gate.repeat_passed must be null exactly when the repeat run did not run")
+    return problems
+
+
+def _checkpoint_problems(r: ExperimentRecord) -> list[str]:
+    ck = r.checkpoint
+    if ck is None:
+        return []
+    problems: list[str] = []
+    if not _FILE_NAME.match(ck.file):
+        problems.append("checkpoint.file must be a file name, not a path")
+    if not _SHA256_HEX.match(ck.payload_sha256):
+        problems.append("checkpoint.payload_sha256 must be a sha256 hex digest")
+    if ck.global_step != r.training.training_steps:
+        problems.append("checkpoint.global_step must equal training.training_steps")
+    return problems
 
 
 def _iter_numbers(value: Any, path: str) -> Iterable[tuple[str, float]]:
@@ -698,13 +968,18 @@ _COLUMNS = (
 def render_ablation_table(records: Sequence[ExperimentRecord]) -> str:
     """Render the ablation table markdown from *formal* records only (deterministic)."""
     lines = [_TABLE_HEADER]
-    formal = [rec for rec in records if rec.experiment.kind == "formal"]
+    formal = [
+        rec for rec in records if rec.experiment.kind == "formal" and rec.status == "completed"
+    ]
     if not formal:
         lines.append("_No formal experiment records yet._\n")
         return "\n".join(lines)
     lines.append("| " + " | ".join(_COLUMNS) + " |")
     lines.append("|" + "|".join("---" for _ in _COLUMNS) + "|")
     for rec in sorted(formal, key=lambda x: x.experiment.id):
+        results = rec.results
+        if results is None:  # completed records always carry results (validated)
+            continue
         p = rec.model.parameters
         commit = rec.repository.git_commit[:10] + (" (dirty)" if rec.repository.git_dirty else "")
         row = (
@@ -719,12 +994,12 @@ def render_ablation_table(records: Sequence[ExperimentRecord]) -> str:
             _fmt_int(rec.dataset.training_tokens),
             _fmt_int(rec.training.training_steps),
             _fmt_float(rec.tokenizer.bytes_per_token, 3),
-            _fmt_float(rec.results.final_loss),
-            _fmt_float(rec.results.final_ppl),
-            _fmt_float(rec.results.final_bpb),
-            _fmt_float(rec.results.tokens_per_second, 1),
-            _fmt_float(rec.results.peak_vram_gb, 2),
-            _fmt_float(rec.results.duration_seconds, 1),
+            _fmt_float(results.final_loss),
+            _fmt_float(results.final_ppl),
+            _fmt_float(results.final_bpb),
+            _fmt_float(results.tokens_per_second, 1),
+            _fmt_float(results.peak_vram_gb, 2),
+            _fmt_float(results.duration_seconds, 1),
             rec.reproducibility.checkpoint_resume_test,
         )
         lines.append("| " + " | ".join(row) + " |")

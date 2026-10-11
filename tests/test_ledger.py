@@ -14,6 +14,7 @@ from kittylm.ledger import (
     REQUIRED_CI_JOBS,
     RESUME_CATEGORIES,
     RESUME_EXACT_REQUIRED,
+    RESUME_GPU_MAX_ABS_DEV,
     RESUME_HARNESS,
     LedgerError,
     load_all_records,
@@ -21,6 +22,7 @@ from kittylm.ledger import (
     parse_record,
     render_ablation_table,
     render_record,
+    resume_verdict_ok,
     write_record,
 )
 from tests.conftest import ROOT
@@ -136,6 +138,69 @@ def valid_record() -> dict[str, Any]:
     }
 
 
+def complete_smoke_record() -> dict[str, Any]:
+    """A valid completed smoke record: every D-025 section present and consistent."""
+    from kittylm.ledger import SMOKE_LIMITATION
+
+    data = valid_record()
+    data["experiment"].update(id="SMOKE-GPU-001", kind="smoke")
+    data["ci_evidence"] = None
+    data["limitations"] = [SMOKE_LIMITATION, "tiny fixture"]
+    data["training"].update(
+        seed=1,
+        min_learning_rate=0.0001,
+        warmup_steps=1,
+        weight_decay=0.0,
+        beta1=0.9,
+        beta2=0.95,
+        adam_eps=1e-8,
+        grad_clip=1.0,
+        effective_batch_size=4,
+        context_length=8,
+        sampler="fixed_windows",
+    )
+    losses = [3.0 - 0.1 * i for i in range(10)]
+    data["training_trace"] = {
+        "steps": 10,
+        "initial_loss": losses[0],
+        "final_loss": losses[-1],
+        "loss_trajectory": [{"step": i + 1, "loss": loss} for i, loss in enumerate(losses)],
+        "loss_series_sha256": SHA,
+        "max_grad_norm": 1.5,
+        "max_loss_increase_ratio": 1.0,
+        "mean_step_time_ms": 12.5,
+        "state_checks": {"learned": True, "finite_parameters": True},
+        "determinism_warnings": [],
+    }
+    data["gate"] = {
+        "max_loss": 0.05,
+        "max_ppl": 1.05,
+        "min_token_match": 0.95,
+        "prompt_tokens": 16,
+        "context_stride": 4,
+        "windows": 2,
+        "final_loss": 2.0,
+        "final_ppl": math.exp(2.0),
+        "token_match_rate": 0.25,
+        "longest_exact_prefix": 1,
+        "exact_match": False,
+        "scored_tokens": 99,
+        "reference_tokens": 84,
+        "generated_tokens": 84,
+        "nonfinite": [],
+        "checks": {"final_loss_below_max": False, "all_values_finite": True},
+        "passed": False,
+        "repeat_loss_series": "identical",
+        "repeat_passed": False,
+    }
+    data["checkpoint"] = {
+        "file": "step-00000010-0123456789abcdef.pt",
+        "payload_sha256": SHA,
+        "global_step": 10,
+    }
+    return data
+
+
 def test_valid_record_parses_and_round_trips() -> None:
     record = parse_record(valid_record())
     assert record.model.parameters.total == 10000
@@ -247,7 +312,7 @@ def test_gpu_passed_allows_measured_tensor_deviations_only() -> None:
 @pytest.mark.parametrize(
     ("comparison", "status", "problem"),
     [
-        (full_comparison(), "failed", "every required category is exact"),
+        (full_comparison(), "failed", "every category is within tolerance"),
         (full_comparison("rocm"), "passed", "device_type must be one of"),
         ({**full_comparison(), "vibes": "exact"}, "passed", "unknown categories"),
         ({"global_step": "exact"}, "passed", "device_type must be one of"),
@@ -299,3 +364,31 @@ def test_committed_ablation_table_is_in_sync() -> None:
     records = load_all_records(ROOT / "experiments")
     committed = (ROOT / "experiments" / "ablations.md").read_text(encoding="utf-8")
     assert committed == render_ablation_table(records)
+
+
+@pytest.mark.parametrize(
+    ("verdict", "ok"),
+    [
+        ("exact", True),
+        (f"max_abs_dev={RESUME_GPU_MAX_ABS_DEV:.3e}", True),
+        ("max_abs_dev=0.000e+00", True),
+        ("max_abs_dev=2.000e-04", False),
+        ("max_abs_dev=inf", False),
+        ("max_abs_dev=nan", False),
+        ("structure differs", False),
+        ("length differs (3 vs 4)", False),
+        ("max_abs_dev=oops", False),
+    ],
+)
+def test_gpu_resume_tolerance_for_tensor_categories(verdict: str, ok: bool) -> None:
+    assert resume_verdict_ok("model_parameters", verdict, "cuda") is ok
+    # Exact-required categories never accept a deviation, on any device.
+    assert resume_verdict_ok("rng_torch", verdict, "cuda") is (verdict == "exact")
+    assert resume_verdict_ok("model_parameters", verdict, "cpu") is (verdict == "exact")
+
+
+def test_passed_gpu_record_beyond_tolerance_is_rejected() -> None:
+    beyond = full_comparison("cuda", loss_series="max_abs_dev=5.000e-03")
+    with pytest.raises(LedgerError, match="exceed the GPU tolerance"):
+        parse_record(resume_record("passed", beyond))
+    assert parse_record(resume_record("failed", beyond))
