@@ -95,7 +95,7 @@ dependencies = [
 [project.optional-dependencies]
 
 dev = [
-    "pytest==9.1.1",
+    "pytest==9.2.0",
     "ruff==0.16.10",
     "mypy==2.4.0",
     "pip-audit==2.10.1",
